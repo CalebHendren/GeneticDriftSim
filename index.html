@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Genetic Drift Simulator</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #121212;
+      color: #f0f0f0;
+      margin: 0;
+      padding: 2rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    canvas {
+      border: 1px solid #555;
+      background: #fff;
+      margin-top: 1rem;
+      width: 90%;
+      height: 400px;
+    }
+    #controls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 1rem;
+    }
+    input, button, label {
+      margin: 0.5rem;
+    }
+    #legend, #sliderContainer {
+      margin-top: 1rem;
+    }
+  </style>
+</head>
+<body>
+<h1>Genetic Drift Simulator (Animated + Slider)</h1>
+
+<div id="controls">
+  <label>Population Size: <input type="number" id="popSize" value="100" min="2"></label>
+  <label>Initial Freq A: <input type="number" id="initFreq" step="0.01" value="0.5" min="0" max="1"></label>
+  <label>Generations: <input type="number" id="generations" value="100" min="1"></label>
+  <label>Replicates: <input type="number" id="replicates" value="5" min="1"></label>
+  <label>Animation Speed (ms/gen): <input type="number" id="speed" value="100" min="10"></label>
+  <label><input type="checkbox" id="highlightFixation" checked> Highlight Fixation</label>
+  <button onclick="startSimulation()">Start</button>
+  <button onclick="togglePause()">Pause/Play</button>
+  <button onclick="downloadCSV()">Download CSV</button>
+</div>
+
+<canvas id="plot" width="1000" height="400"></canvas>
+
+<div id="sliderContainer">
+  <label>Generation: <input type="range" id="genSlider" min="0" value="0" oninput="manualDraw(this.value)"></label>
+</div>
+
+<div id="legend"></div>
+
+<script>
+  let animationId = null;
+  let paused = false;
+  let allData = [];
+  let genIndex = 0;
+  let generations = 100;
+  let highlightFixation = true;
+  let speed = 100;
+
+  function startSimulation() {
+    cancelAnimationFrame(animationId);
+    genIndex = 0;
+    paused = false;
+
+    const N = parseInt(document.getElementById('popSize').value);
+    const p0 = parseFloat(document.getElementById('initFreq').value);
+    generations = parseInt(document.getElementById('generations').value);
+    const reps = parseInt(document.getElementById('replicates').value);
+    speed = parseInt(document.getElementById('speed').value);
+    highlightFixation = document.getElementById('highlightFixation').checked;
+
+    allData = simulateDrifts(N, p0, generations, reps);
+    document.getElementById('genSlider').max = generations;
+    animate();
+  }
+
+  function togglePause() {
+    paused = !paused;
+  }
+
+  function simulateDrifts(N, p0, gens, reps) {
+    let result = [];
+    for (let r = 0; r < reps; r++) {
+      let line = [p0];
+      let p = p0;
+      for (let g = 1; g <= gens; g++) {
+        let countA = 0;
+        for (let i = 0; i < N; i++) {
+          if (Math.random() < p) countA++;
+        }
+        p = countA / N;
+        line.push(p);
+        if (p === 0 || p === 1) {
+          while (line.length <= gens) line.push(p);
+          break;
+        }
+      }
+      result.push(line);
+    }
+    return result;
+  }
+
+  function animate() {
+    if (!paused) {
+      drawFrame(genIndex);
+      document.getElementById('genSlider').value = genIndex;
+      genIndex++;
+    }
+    if (genIndex <= generations) {
+      setTimeout(() => requestAnimationFrame(animate), speed);
+    }
+  }
+
+  function drawFrame(frame) {
+    const canvas = document.getElementById('plot');
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+
+    ctx.clearRect(0, 0, w, h);
+
+    const scaleX = (w - 60) / generations;
+    const scaleY = (h - 60);
+
+    ctx.strokeStyle = "#888";
+    ctx.beginPath();
+    ctx.moveTo(40, 0); ctx.lineTo(40, h);
+    ctx.moveTo(0, h - 40); ctx.lineTo(w, h - 40);
+    ctx.stroke();
+
+    // Y-axis label (rotated and centered)
+    ctx.save();
+    ctx.translate(15, h / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillStyle = "#000";
+    ctx.font = "14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("Allele Frequency (A)", 0, 0);
+    ctx.restore();
+
+    // X-axis label (centered)
+    ctx.fillStyle = "#000";
+    ctx.font = "14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("Generation", w / 2, h - 5);
+
+    allData.forEach((data) => {
+      ctx.beginPath();
+      let color = "rgba(0, 120, 255, 0.6)";
+      const lastVal = data[frame] ?? data[data.length - 1];
+      if (highlightFixation && lastVal === 1) color = "rgba(0,255,0,0.6)";
+      else if (highlightFixation && lastVal === 0) color = "rgba(255,0,0,0.6)";
+      ctx.strokeStyle = color;
+
+      for (let i = 0; i <= frame && i < data.length; i++) {
+        const x = 40 + i * scaleX;
+        const y = (h - 40) - data[i] * scaleY;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    });
+
+    ctx.fillStyle = "#fff";
+    ctx.fillText("1.0", 5, 20);
+    ctx.fillText("0.0", 5, h - 40);
+    ctx.fillText("Gen: " + frame, w / 2 - 30, h - 25);
+
+    document.getElementById("legend").innerHTML = `
+        <span style="color:blue">Blue</span>: Evolving &nbsp;
+        <span style="color:green">Green</span>: Fixed A (p=1) &nbsp;
+        <span style="color:red">Red</span>: Lost A (p=0)`;
+  }
+
+  function manualDraw(frame) {
+    genIndex = parseInt(frame);
+    drawFrame(genIndex);
+  }
+
+  function downloadCSV() {
+    const gens = generations + 1;
+    let csv = "Generation";
+    for (let i = 0; i < allData.length; i++) {
+      csv += `,Replicate${i + 1}`;
+    }
+    csv += "\n";
+
+    for (let g = 0; g < gens; g++) {
+      csv += `${g}`;
+      for (let i = 0; i < allData.length; i++) {
+        csv += `,${allData[i][g]}`;
+      }
+      csv += "\n";
+    }
+
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "genetic_drift.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+</script>
+</body>
+</html>
